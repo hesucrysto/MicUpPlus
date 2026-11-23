@@ -38,6 +38,7 @@ fun PluginEditorScreen(
 
     // Load live params from native plugin if descriptor has none
     var liveParams by remember { mutableStateOf(slot.descriptor.params) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(slot.nativeHandle) {
         if (slot.nativeHandle != 0L) {
             val json = withContext(Dispatchers.IO) {
@@ -55,9 +56,16 @@ fun PluginEditorScreen(
                         default = o["default"]?.jsonPrimitive?.float ?: 0f,
                     )
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                loadError = "Could not read plugin parameters: ${e.message}"
+            }
         }
     }
+    // Derived, not written back into state: writing a MutableState during
+    // composition is a Compose side-effect bug.
+    val bannerError: String? = loadError ?: if (
+        slot.nativeHandle == 0L && slot.descriptor.format != com.micplugin.plugin.PluginFormat.APK
+    ) "This plugin did not load. Rescan or re-import a build for this device ABI." else null
 
     Column(
         modifier = Modifier
@@ -107,6 +115,18 @@ fun PluginEditorScreen(
             ) {
                 Text("⚠ VST3 Experimental — parameter control may be limited.",
                     fontSize = 10.sp, color = StudioColors.MeterAmber,
+                    modifier = Modifier.padding(10.dp))
+            }
+        }
+
+        if (bannerError != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                color    = StudioColors.MeterRed.copy(alpha = 0.1f),
+                shape    = RoundedCornerShape(6.dp),
+                border   = BorderStroke(0.5.dp, StudioColors.MeterRed),
+            ) {
+                Text(bannerError ?: "", fontSize = 10.sp, color = StudioColors.MeterRed,
                     modifier = Modifier.padding(10.dp))
             }
         }
@@ -178,7 +198,7 @@ private fun PluginParamControl(
                     value = value,
                     onValueChange = onChange,
                     valueRange = param.min..param.max,
-                    steps = (param.max - param.min).toInt() - 1,
+                    steps = ((param.max - param.min).toInt() - 1).coerceAtLeast(0),
                     colors = SliderDefaults.colors(
                         thumbColor = StudioColors.Accent,
                         activeTrackColor = StudioColors.Accent,

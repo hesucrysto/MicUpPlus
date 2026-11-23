@@ -21,17 +21,22 @@ static int64_t nowNs() {
 
 PluginHost::~PluginHost() {
     std::lock_guard<std::mutex> lock(uiMutex_);
-    for (auto& p : chain_)        p->cleanup();
+    // pendingChain_ is the master list: every live instance is in it exactly
+    // once. chain_/nextChain_ only hold copies. Cleaning those too would call
+    // cleanup() twice on the same plugin (double dlclose/destroy).
     for (auto& p : pendingChain_) p->cleanup();
+    for (auto& p : retiredChain_) p->cleanup();
 }
 
-void PluginHost::process(float* buf, int32_t frames, int32_t /*sampleRate*/) {
-    // Commit pending chain (lock-free check)
+void PluginHost::process(float* buf, int32_t frames, int32_t sampleRate) {
+    // Commit the UI-built snapshot without allocating on the audio thread.
+    // If the UI holds the lock, keep processing the previous chain this block.
     if (chainDirty_.load(std::memory_order_acquire)) {
-        // Swap atomically — the UI thread has already built pendingChain_
-        std::lock_guard<std::mutex> lock(uiMutex_);
-        chain_ = pendingChain_;
-        chainDirty_.store(false, std::memory_order_release);
+        std::unique_lock<std::mutex> lock(uiMutex_, std::try_to_lock);
+        if (lock.owns_lock()) {
+            chain_.swap(nextChain_);
+            chainDirty_.store(false, std::memory_order_release);
+        }
     }
 
     for (auto& plugin : chain_) {
@@ -39,7 +44,7 @@ void PluginHost::process(float* buf, int32_t frames, int32_t /*sampleRate*/) {
         if (plugin->bypassed.load(std::memory_order_relaxed)) continue;
 
         int64_t t0 = nowNs();
-        bool ok = plugin->process(buf, frames, 48000);
+        bool ok = plugin->process(buf, frames, sampleRate);
         int64_t elapsed = nowNs() - t0;
 
         if (!ok || elapsed > kWatchdogNs) {
@@ -72,6 +77,7 @@ jlong PluginHost::loadPlugin(const char* path, int32_t formatId, int32_t sampleR
     instance->path   = path;
 
     pendingChain_.push_back(instance);
+    nextChain_ = pendingChain_;
     chainDirty_.store(true, std::memory_order_release);
 
     LOGI("Loaded plugin: %s (handle=%lld)", path, (long long)instance->handle);
@@ -80,13 +86,18 @@ jlong PluginHost::loadPlugin(const char* path, int32_t formatId, int32_t sampleR
 
 void PluginHost::unloadPlugin(jlong handle) {
     std::lock_guard<std::mutex> lock(uiMutex_);
-    pendingChain_.erase(
-        std::remove_if(pendingChain_.begin(), pendingChain_.end(),
-            [handle](const auto& p) {
-                if (p->handle == handle) { p->cleanup(); return true; }
-                return false;
-            }),
-        pendingChain_.end());
+    auto it = std::remove_if(pendingChain_.begin(), pendingChain_.end(),
+        [handle, this](const auto& p) {
+            if (p->handle == handle) {
+                // Defer cleanup: the audio callback may still hold a copy of
+                // this shared_ptr for the current block.
+                retiredChain_.push_back(p);
+                return true;
+            }
+            return false;
+        });
+    pendingChain_.erase(it, pendingChain_.end());
+    nextChain_ = pendingChain_;
     chainDirty_.store(true, std::memory_order_release);
 }
 
@@ -101,7 +112,14 @@ void PluginHost::setPluginParam(jlong handle, int32_t paramId, float value) {
 }
 
 void PluginHost::setPluginEnabled(jlong handle, bool enabled) {
-    // Safe to write from UI because it's an atomic bool
+    // Safe to write from UI because it's an atomic bool. Check both chains:
+    // chain_ is empty until the first audio callback after a load.
+    for (auto& p : pendingChain_) {
+        if (p->handle == handle) {
+            p->enabled.store(enabled, std::memory_order_relaxed);
+            return;
+        }
+    }
     for (auto& p : chain_) {
         if (p->handle == handle) {
             p->enabled.store(enabled, std::memory_order_relaxed);
@@ -119,6 +137,7 @@ void PluginHost::reorderPlugin(jlong handle, int32_t newPos) {
     pendingChain_.erase(it);
     newPos = std::max(0, std::min(newPos, (int)pendingChain_.size()));
     pendingChain_.insert(pendingChain_.begin() + newPos, plugin);
+    nextChain_ = pendingChain_;
     chainDirty_.store(true, std::memory_order_release);
 }
 
@@ -128,6 +147,8 @@ namespace micplugin {
 std::shared_ptr<PluginInstance> PluginHost::findPlugin(jlong handle) {
     std::lock_guard<std::mutex> lock(uiMutex_);
     for (auto& p : pendingChain_)
+        if (p->handle == handle) return p;
+    for (auto& p : chain_)
         if (p->handle == handle) return p;
     return nullptr;
 }

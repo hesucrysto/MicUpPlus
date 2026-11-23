@@ -116,14 +116,41 @@ class ShizukuManager @Inject constructor() {
     }
 
     private fun execInternal(cmd: String): String? {
+        if (_state.value != ShizukuState.READY) return null
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val out = process.inputStream.bufferedReader().readText()
-            process.waitFor()
-            Log.d(TAG, "exec[$cmd] => ${out.take(120)}")
-            out
+            // This used to be Runtime.exec(), which runs as the app UID and
+            // therefore could never perform any of the privileged operations
+            // Shizuku was granted for. Shizuku.newProcess() runs the command
+            // through the Shizuku server (shell/ADB UID).
+            val process = Shizuku.newProcess(arrayOf("sh", "-c", cmd), null, null)
+            val stdout = StringBuilder()
+            val stderr = StringBuilder()
+
+            val outReader = Thread {
+                runCatching {
+                    process.inputStream.bufferedReader().forEachLine { stdout.appendLine(it) }
+                }
+            }
+            val errReader = Thread {
+                runCatching {
+                    process.errorStream.bufferedReader().forEachLine { stderr.appendLine(it) }
+                }
+            }
+            outReader.start()
+            errReader.start()
+
+            val finished = process.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroy()
+                Log.w(TAG, "Shizuku command timed out: $cmd")
+            }
+            outReader.join(500)
+            errReader.join(500)
+
+            Log.d(TAG, "shizuku[$cmd] rc=${if (finished) "ok" else "timeout"} out=${stdout.take(120)} err=${stderr.take(80)}")
+            if (stdout.isBlank() && stderr.isNotBlank()) null else stdout.toString()
         } catch (e: Exception) {
-            Log.e(TAG, "exec failed: $e")
+            Log.e(TAG, "Shizuku exec failed: $e")
             null
         }
     }

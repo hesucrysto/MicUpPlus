@@ -56,6 +56,13 @@ private:
 
     std::vector<std::shared_ptr<PluginInstance>> chain_;        // audio thread reads
     std::vector<std::shared_ptr<PluginInstance>> pendingChain_; // UI thread writes
+    // Pre-built snapshot committed by the audio thread with a pointer swap, so
+    // the audio callback never allocates. Built under uiMutex_ on the UI thread.
+    std::vector<std::shared_ptr<PluginInstance>> nextChain_;
+    // Removed plugins that may still be referenced by one audio callback.
+    // They are kept alive until PluginHost is destroyed instead of being
+    // cleanup()'d under the audio thread (use-after-free/crash).
+    std::vector<std::shared_ptr<PluginInstance>> retiredChain_;
     std::atomic<bool> chainDirty_{false};
     std::mutex uiMutex_;
 

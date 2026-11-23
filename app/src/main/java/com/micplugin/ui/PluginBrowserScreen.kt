@@ -2,7 +2,6 @@ package com.micplugin.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.unit.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,12 +12,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import android.content.Intent
+import android.widget.Toast
+import com.micplugin.plugin.ImportSummary
 import com.micplugin.plugin.PluginDescriptor
 import com.micplugin.plugin.PluginFormat
+import com.micplugin.plugin.PluginImporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PluginBrowserScreen(
@@ -28,19 +37,68 @@ fun PluginBrowserScreen(
     val discovered  by vm.discovered.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("INSTALLED", "APK PLUGINS")
+    val tabs = listOf("INSTALLED")
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importing by remember { mutableStateOf(false) }
 
     val nativePlugins = discovered.filter { it.format != PluginFormat.APK }
-    val apkPlugins    = discovered.filter { it.format == PluginFormat.APK }
 
     val filtered = when (selectedTab) {
         0 -> nativePlugins
-        1 -> apkPlugins
         else -> discovered
     }.filter {
         searchQuery.isEmpty() ||
         it.name.contains(searchQuery, ignoreCase = true) ||
         it.format.name.contains(searchQuery, ignoreCase = true)
+    }
+
+    fun importUris(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        scope.launch {
+            importing = true
+            val summary = withContext(Dispatchers.IO) {
+                var ok = 0
+                var failed = 0
+                val errors = mutableListOf<String>()
+                uris.forEach { uri ->
+                    val result = PluginImporter.importFromUri(context, uri)
+                    if (result.success) ok++ else {
+                        failed++
+                        if (errors.size < 5) errors += result.error
+                    }
+                }
+                ImportSummary(ok, failed, errors)
+            }
+            vm.rescan()
+            Toast.makeText(context, summary.message(), Toast.LENGTH_LONG).show()
+            importing = false
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> importUris(uris) }
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            scope.launch {
+                importing = true
+                val summary = withContext(Dispatchers.IO) {
+                    PluginImporter.importTree(context, uri)
+                }
+                vm.rescan()
+                Toast.makeText(context, summary.message(), Toast.LENGTH_LONG).show()
+                importing = false
+            }
+        }
     }
 
     Column(
@@ -66,6 +124,22 @@ fun PluginBrowserScreen(
                 letterSpacing = 2.sp,
                 modifier = Modifier.weight(1f),
             )
+            IconButton(onClick = { folderPicker.launch(null) }, enabled = !importing) {
+                Icon(Icons.Default.Folder, "Import plugin folder", tint = StudioColors.Accent)
+            }
+            IconButton(
+                onClick = { filePicker.launch(arrayOf("*/*")) },
+                enabled = !importing,
+            ) {
+                Icon(Icons.Default.Add, "Import plugin file", tint = StudioColors.Accent)
+            }
+            if (importing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = StudioColors.Accent,
+                )
+            }
             IconButton(onClick = { vm.rescan() }) {
                 Icon(Icons.Default.Refresh, "Rescan", tint = StudioColors.Accent)
             }
@@ -127,11 +201,22 @@ fun PluginBrowserScreen(
                     Text("No plugins found", color = StudioColors.TextMuted)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Place .clap / .so / .lv2 files in:\n" +
-                        "Files > Android > data > com.micplugin > files > plugins",
+                        "Import a plugin file or a plugin folder.\n" +
+                        "MicUp++ copies it into app-private storage, so it works on Android 11+ " +
+                        "without /Android/data access.",
                         color = StudioColors.TextMuted, fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { folderPicker.launch(null) },
+                        colors = ButtonDefaults.buttonColors(containerColor = StudioColors.Accent),
+                    ) { Text("Import folder") }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { filePicker.launch(arrayOf("*/*")) },
+                        border = BorderStroke(1.dp, StudioColors.AccentDim),
+                    ) { Text("Import file", color = StudioColors.Accent) }
                 }
             }
         } else {

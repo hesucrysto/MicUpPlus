@@ -255,14 +255,21 @@ private:
     AllpassFilter aps_[2]  = {AllpassFilter(556), AllpassFilter(441)};
 
     // ─ Pitch shifter state ─
-    static constexpr int kGrainSize = 2048;
-    static constexpr int kHopOut    = 512;
-    float pitchIn_[kGrainSize*2]{};
-    float pitchOut_[kGrainSize*2]{};
-    float pitchWindow_[kGrainSize]{};
-    int   pitchWritePos_  = 0;
-    float pitchReadFrac_  = 0.0f;
-    // pitchRateCache_ removed (unused)
+    // Two-tap granular pitch shifter. Each tap advances through a ring at the
+    // pitch rate and wraps by one grain while its Hann weight is zero, so the
+    // wrap never produces the click the old single-tap implementation had.
+    static constexpr int   kPitchRingSize = 8192;   // power of two
+    static constexpr int   kPitchMask     = kPitchRingSize - 1;
+    static constexpr float kPitchGrain    = 2048.0f;
+    float pitchRing_[kPitchRingSize]{};
+    int   pitchWrite_ = 0;
+    float pitchLagA_  = kPitchGrain * 0.25f;
+    float pitchLagB_  = kPitchGrain * 0.75f;
+    float pitchRate_  = 1.0f;
+    bool  pitchPrimed_ = false;
+    bool  pitchWasEnabled_ = false;
+    void resetPitchState();
+    float readPitchTap(float lag) const;
 };
 
 } // namespace micplugin

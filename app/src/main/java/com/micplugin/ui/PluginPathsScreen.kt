@@ -64,13 +64,16 @@ fun PluginPathsScreen(navController: NavController, vm: AudioViewModel = hiltVie
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Where to put plugin files", fontSize = 11.sp,
                     color = Color(0xFF90CAF9), fontFamily = FontFamily.Monospace)
-                Text("LV2:  file.so or file.lv2", fontSize = 10.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
+                Text("Use Import Plugin Files first — it copies files into app storage.", fontSize = 10.sp, color = StudioColors.TextMuted)
+                Text("LV2:  file.so inside a .lv2 bundle", fontSize = 10.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
                 Text("CLAP: file.clap or file.so", fontSize = 10.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
-                Text("VST3: file.so", fontSize = 10.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
+                Text("VST3: file.so inside a .vst3 bundle", fontSize = 10.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
                 Spacer(Modifier.height(4.dp))
-                Text("Default internal path (always scanned):", fontSize = 10.sp, color = StudioColors.TextMuted)
-                Text("Android/data/com.micplugin/files/plugins/{lv2,clap,vst3}",
+                Text("Always scanned:", fontSize = 10.sp, color = StudioColors.TextMuted)
+                Text("app-private files/plugins/{lv2,clap,vst3,imported}",
                     fontSize = 9.sp, color = StudioColors.Accent, fontFamily = FontFamily.Monospace)
+                Text("Android 11+ blocks /Android/data for file managers. SAF import avoids it.",
+                    fontSize = 9.sp, color = StudioColors.TextMuted, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -188,7 +191,7 @@ private fun AddPathDialog(
     onDismiss: () -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
-    val suggestions = PluginPathPrefs.suggestedPaths()
+    val suggestions = PluginPathPrefs.suggestedPaths(LocalContext.current)
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(

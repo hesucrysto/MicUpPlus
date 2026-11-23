@@ -18,18 +18,20 @@ class PluginPathPrefs @Inject constructor() {
         private const val KEY_VST3   = "vst3_paths"
         private const val SEP        = "|||"
 
-        /** Suggested paths users can pick from */
-        fun suggestedPaths(): List<String> {
+        /** Suggested paths users can pick from. SAF import is the Android 11+ path. */
+        fun suggestedPaths(context: Context): List<String> {
             val sdcard = Environment.getExternalStorageDirectory().absolutePath
-            return listOf(
+            val externalPlugins = context.getExternalFilesDir(null)?.let { File(it, "plugins").absolutePath }
+            return listOfNotNull(
+                File(context.filesDir, "plugins").absolutePath,
+                externalPlugins,
                 "$sdcard/MicUp/plugins",
                 "$sdcard/MicUp/plugins/lv2",
                 "$sdcard/MicUp/plugins/clap",
                 "$sdcard/MicUp/plugins/vst3",
-                "$sdcard/Android/data/com.micplugin/files/plugins",
-                "/sdcard/MicUp/plugins",
+                "$sdcard/Android/data/${context.packageName}/files/plugins",
                 "/data/local/tmp/micplugin_plugins",
-            )
+            ).distinct()
         }
     }
 

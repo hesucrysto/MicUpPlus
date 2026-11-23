@@ -12,11 +12,12 @@ android {
     ndkVersion = "26.3.11579264"
 
     defaultConfig {
-        applicationId = "com.micplugin"
+        // MicUp++ ships as its own package so it can be installed next to upstream MicUp.
+        applicationId = "com.micplugin.plus"
         minSdk = 26
         targetSdk = 34
         // Version injected by CI from git tag (e.g. v1.2.3 → 1.2.3)
-        val tagName = System.getenv("RELEASE_TAG") ?: "1.0.0"
+        val tagName = System.getenv("RELEASE_TAG") ?: "2.0.0"
         val cleanTag = tagName.removePrefix("v")
         val parts = cleanTag.split(".").mapNotNull { it.toIntOrNull() }
         versionCode = (parts.getOrElse(0){1} * 10000) +
@@ -132,7 +133,13 @@ dependencies {
     // Core
     implementation(libs.core.ktx)
 
-    // Shizuku — ADB-level privileged API access (no root required)
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Storage Access Framework helpers for plugin-folder imports (Android 11+)
+    implementation(libs.documentfile)
+
+    // Shizuku — ADB-level privileged API access (no root required).
+    // 12.2.0 keeps Shizuku.newProcess() public; 13.1.x made it private and it is
+    // scheduled for removal in API 14. The shell bridge in ShizukuManager uses it
+    // deliberately, so the API is pinned to the last public release.
+    implementation("dev.rikka.shizuku:api:12.2.0")
+    implementation("dev.rikka.shizuku:provider:12.2.0")
 }

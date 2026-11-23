@@ -229,8 +229,9 @@ fun EqBandFader(
     modifier: Modifier = Modifier,
 ) {
     val range   = 15f
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var baseGain   by remember { mutableFloatStateOf(gainDb) }
+    val currentGain by rememberUpdatedState(gainDb)
+    var dragBase by remember { mutableFloatStateOf(0f) }
+    var dragDy   by remember { mutableFloatStateOf(0f) }
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
@@ -247,11 +248,16 @@ fun EqBandFader(
                 .border(1.dp, StudioColors.Border, RoundedCornerShape(3.dp))
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
-                        onDragStart = { baseGain = gainDb },
+                        onDragStart = {
+                            dragBase = currentGain
+                            dragDy = 0f
+                        },
                         onDragEnd   = {},
                         onVerticalDrag = { _, dy ->
-                            val newGain = (baseGain - dy / 3f).coerceIn(-range, range)
-                            baseGain = newGain
+                            // detectVerticalDragGestures already consumes once the
+                            // touch slop is crossed, so no extra consume() here.
+                            dragDy += dy
+                            val newGain = (dragBase - dragDy / 3f).coerceIn(-range, range)
                             onGainChange(newGain)
                         },
                     )
@@ -314,21 +320,33 @@ fun KnobWidget(
 ) {
     val startAngle = 225f
     val sweepAngle = 270f
-    val frac = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
-    var lastY by remember { mutableFloatStateOf(0f) }
+    val frac = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start))
+        .coerceIn(0f, 1f)
+    val currentValue by rememberUpdatedState(value)
+    var dragBase by remember { mutableFloatStateOf(0f) }
+    var dragDy   by remember { mutableFloatStateOf(0f) }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(
             modifier = Modifier
                 .size(size)
-                .pointerInput(Unit) {
+                .pointerInput(valueRange) {
                     detectVerticalDragGestures(
-                        onDragStart = { offset -> lastY = offset.y },
+                        onDragStart = {
+                            // Capture the value at gesture start. The old code
+                            // read `value` from the composition that created the
+                            // pointerInput block, so every drag event applied a
+                            // tiny delta to the same stale number — the knob
+                            // barely moved (issue #16).
+                            dragBase = currentValue
+                            dragDy = 0f
+                        },
                         onDragEnd   = {},
                         onVerticalDrag = { _, dy ->
-                            val delta = -dy / 200f
+                            // Drag detector consumes the change itself after slop.
+                            dragDy += dy
                             val range = valueRange.endInclusive - valueRange.start
-                            val newVal = (value + delta * range)
+                            val newVal = (dragBase - dragDy / 200f * range)
                                 .coerceIn(valueRange.start, valueRange.endInclusive)
                             onValueChange(newVal)
                         },

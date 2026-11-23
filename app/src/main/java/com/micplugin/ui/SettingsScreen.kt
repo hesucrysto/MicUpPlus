@@ -203,14 +203,17 @@ fun SettingsScreen(navController: NavController, vm: AudioViewModel = hiltViewMo
 
             // ── Plugins ───────────────────────────────────────────────────────
             SettingsSection("Plugins") {
-                SettingsActionRow("Manage Plugin Paths", Icons.Default.FolderOpen) { navController.navigate("plugin_paths") }
+                SettingsActionRow("Import Plugin Files", Icons.Default.FolderOpen) {
+                    navController.navigate("plugin_browser")
+                }
+                SettingsActionRow("Manage Plugin Paths", Icons.Default.Folder) { navController.navigate("plugin_paths") }
                 SettingsActionRow("Rescan Plugin Directories", Icons.Default.Refresh) { vm.rescan() }
             }
 
             // ── About ─────────────────────────────────────────────────────────
             SettingsSection("About") {
                 SettingsInfoRow("Version", com.micplugin.BuildConfig.VERSION_NAME)
-                SettingsInfoRow("Build", "MicUp · Oboe 1.8.1 · CLAP 1.2.1 · LV2")
+                SettingsInfoRow("Build", "MicUp++ · Oboe 1.8.1 · CLAP 1.2.1 · LV2")
                 SettingsInfoRow("Native", "C++17 · NDK 26 · AAudio/OpenSL ES")
             }
 

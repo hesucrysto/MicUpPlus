@@ -36,6 +36,8 @@ class AudioProcessingService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private fun startStatusUpdates() {
+        if (updatesStarted) return
+        updatesStarted = true
         scope.launch {
             var failCount = 0
             while (isActive) {
@@ -76,7 +78,7 @@ class AudioProcessingService : Service() {
 
         val latencyStr = if (latencyMs > 0f) " · ${latencyMs.toInt()}ms" else ""
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("MicUp Active")
+            .setContentTitle("MicUp++ Active")
             .setContentText("$text$latencyStr")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(mainIntent)
@@ -139,8 +141,19 @@ class AudioProcessingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Restore the saved input selection before the native engine opens its
+        // streams. Previously this only happened if the user opened Settings,
+        // so a saved USB/headset mic was ignored on a cold start (issue #5).
+        val prefs = getSharedPreferences("micup_prefs", MODE_PRIVATE)
+        audioEngine.setInputDevice(prefs.getInt("input_device_id", -1))
+
         audioEngine.setMonitorCallback { buf: FloatArray, size: Int -> SoftwareLoopback.writeProcessed(buf, size) }
-        audioEngine.start()
+        val started = audioEngine.start()
+        if (!started) {
+            android.util.Log.e("MicUp.Service", "Audio engine failed to start")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startStatusUpdates()
         if (!SoftwareLoopback.isRunning) SoftwareLoopback.start(this)
         return START_STICKY
@@ -149,6 +162,7 @@ class AudioProcessingService : Service() {
     override fun onDestroy() {
         updatesStarted = false
         scope.cancel()
+        audioEngine.setMonitorCallback(null)
         audioEngine.stop()
         SoftwareLoopback.stop()
         wakeLock?.release()

@@ -41,12 +41,13 @@ object CrashReporter {
             throwable.printStackTrace(PrintWriter(sw))
 
             val text = buildString {
-                appendLine("=== MicUp Crash Report ===")
+                appendLine("=== MicUp++ Crash Report ===")
                 appendLine("Time:    $ts")
                 appendLine("Thread:  ${thread.name}")
                 appendLine("Device:  ${Build.MANUFACTURER} ${Build.MODEL}")
                 appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                 appendLine("ABI:     ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"}")
+                appendLine("Fork:    MicUp++")
                 appendLine()
                 appendLine(sw.toString())
             }

@@ -28,6 +28,12 @@ class PluginChain @Inject constructor() {
         }
     }
 
+    fun setEnabled(id: UUID, enabled: Boolean) {
+        _slots.value = _slots.value.map {
+            if (it.id == id) it.copy(enabled = enabled) else it
+        }
+    }
+
     fun reorder(fromIndex: Int, toIndex: Int) {
         val list = _slots.value.toMutableList()
         if (fromIndex !in list.indices || toIndex !in list.indices) return

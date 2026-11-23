@@ -37,6 +37,7 @@ fun MainScreen(navController: NavController, vm: AudioViewModel = hiltViewModel(
     val selectedPreset by vm.selectedPreset.collectAsState()
     val pluginSlots by vm.pluginSlots.collectAsState()
     val tier        by vm.virtualMicTier.collectAsState()
+    val loadError   by vm.pluginLoadError.collectAsState()
 
     var showSaveDialog by remember { mutableStateOf(false) }
     var presetName     by remember { mutableStateOf("") }
@@ -58,7 +59,7 @@ fun MainScreen(navController: NavController, vm: AudioViewModel = hiltViewModel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "MIC PLUGIN",
+                "MICUP++",
                 style = MaterialTheme.typography.titleLarge,
                 color = StudioColors.TextPrimary,
                 fontWeight = FontWeight.Black,
@@ -92,6 +93,30 @@ fun MainScreen(navController: NavController, vm: AudioViewModel = hiltViewModel(
         }
 
         // ── Preset chips ──────────────────────────────────────────────────────
+        if (loadError != null) {
+            Surface(
+                shape = RoundedCornerShape(7.dp),
+                color = StudioColors.MeterRed.copy(alpha = 0.12f),
+                border = BorderStroke(0.5.dp, StudioColors.MeterRed.copy(alpha = 0.6f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        loadError ?: "",
+                        fontSize = 10.sp,
+                        color = StudioColors.MeterRed,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { vm.clearPluginLoadError() }) {
+                        Text("Dismiss", fontSize = 10.sp, color = StudioColors.MeterRed)
+                    }
+                }
+            }
+        }
+
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(presets) { preset ->
                 val isSelected = selectedPreset?.name == preset.name

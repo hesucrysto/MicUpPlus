@@ -113,6 +113,9 @@ class AudioEngine @Inject constructor(
     fun setNativePluginParam(handle: Long, paramId: Int, value: Float) =
         oboe.setPluginParam(handle, paramId, value)
 
+    fun setNativePluginEnabled(handle: Long, enabled: Boolean) =
+        oboe.setPluginEnabled(handle, enabled)
+
     // ── Meter polling (50ms cadence, off audio thread) ────────────────────────
     private fun startMeterPolling() {
         meterJob = scope.launch {

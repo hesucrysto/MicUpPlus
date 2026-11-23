@@ -5,9 +5,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.PowerManager
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
 import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -75,7 +75,6 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(permissionsToRequest)
         // Handle file opened from file manager
         handleIncomingPlugin(intent)
-        requestAllFilesPermission()
         setContent {
             MicPluginTheme {
                 val navController = rememberNavController()
@@ -114,12 +113,16 @@ class MainActivity : ComponentActivity() {
         val uri = intent?.data ?: return
         if (intent.action != android.content.Intent.ACTION_VIEW) return
         val activity = this
-        kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) {
+        lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 PluginImporter.importFromUri(activity, uri)
             }
             if (result.success) {
-                val vm = androidx.lifecycle.ViewModelProvider(activity)[com.micplugin.ui.AudioViewModel::class.java]
+                // @AndroidEntryPoint overrides defaultViewModelProviderFactory with
+                // the Hilt factory, so this returns the same instance Compose uses.
+                val vm = androidx.lifecycle.ViewModelProvider(
+                    activity, activity.defaultViewModelProviderFactory
+                )[com.micplugin.ui.AudioViewModel::class.java]
                 vm.rescan()
                 android.widget.Toast.makeText(
                     activity,
@@ -136,22 +139,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-
-    private fun requestAllFilesPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                try {
-                    val intent = android.content.Intent(
-                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        android.net.Uri.parse("package:$packageName")
-                    )
-                    startActivity(intent)
-                } catch (_: Exception) {
-                    startActivity(android.content.Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                }
-            }
-        }
-    }
 
     override fun onDestroy() {
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
@@ -179,10 +166,14 @@ class MainActivity : ComponentActivity() {
 
     private fun requestBatteryOptimizationExemption() {
         if (Build.VERSION.SDK_INT >= 23) {
-            // Don't bother the user if the app is already exempt — otherwise the battery
-            // settings screen pops up on every launch / every time the app is reopened.
+            val prefs = getSharedPreferences("micup_prefs", MODE_PRIVATE)
+            if (prefs.getBoolean("battery_prompt_done", false)) return
             val pm = getSystemService(PowerManager::class.java)
-            if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) return
+            if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) {
+                prefs.edit().putBoolean("battery_prompt_done", true).apply()
+                return
+            }
+            prefs.edit().putBoolean("battery_prompt_done", true).apply()
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
             }

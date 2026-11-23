@@ -100,12 +100,7 @@ void BiquadFilter::setHighShelf(float fc, float gainDb, float sr) {
 
 // ─── AudioEngine ─────────────────────────────────────────────────────────────
 AudioEngine::AudioEngine() {
-    // Init Hann window for pitch shifter
-    for (int i = 0; i < kGrainSize; i++) {
-        pitchWindow_[i] = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / kGrainSize));
-    }
-    std::fill(pitchIn_,  pitchIn_  + kGrainSize*2, 0.0f);
-    std::fill(pitchOut_, pitchOut_ + kGrainSize*2, 0.0f);
+    resetPitchState();
 }
 
 AudioEngine::~AudioEngine() {
@@ -127,62 +122,89 @@ void AudioEngine::stop() {
 }
 
 bool AudioEngine::openStreams() {
-    oboe::AudioStreamBuilder builder;
+    int32_t preferredInputId = inputDeviceId_.load(std::memory_order_relaxed);
 
     // ─ Input stream (microphone capture) ─────────────────────────────────────
-    // deviceId defaults to oboe::kUnspecified (system default mic) unless the user picked
-    // a specific input (e.g. a USB sound card) in Settings — see setInputDeviceId().
-    int32_t preferredInputId = inputDeviceId_.load(std::memory_order_relaxed);
-    auto result = builder
-        .setDirection(oboe::Direction::Input)
-        ->setDeviceId(preferredInputId)
-        ->setInputPreset(oboe::InputPreset::VoiceCommunication)
-        ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-        ->setSharingMode(oboe::SharingMode::Exclusive)
-        ->setFormat(oboe::AudioFormat::Float)
-        ->setChannelCount(1)
-        ->setSampleRate(48000)
-        ->openStream(inputStream_);
+    // Try low-latency exclusive first, then shared, then the voice-communication
+    // preset. Some devices/USB sound cards reject one combination but accept the
+    // next. Never leave the engine dead because the "best" mode is unavailable.
+    auto openInput = [&](oboe::SharingMode sharing, oboe::InputPreset preset) -> oboe::Result {
+        oboe::AudioStreamBuilder b;
+        b.setDirection(oboe::Direction::Input)
+            ->setDeviceId(preferredInputId)
+            ->setInputPreset(preset)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setSharingMode(sharing)
+            ->setFormat(oboe::AudioFormat::Float)
+            ->setChannelCount(1)
+            ->setSampleRate(48000);
+        return b.openStream(inputStream_);
+    };
 
+    oboe::Result result = openInput(oboe::SharingMode::Exclusive, oboe::InputPreset::VoiceRecognition);
+    if (result != oboe::Result::OK) {
+        LOGE("Input exclusive/voice-recognition failed: %s", oboe::convertToText(result));
+        result = openInput(oboe::SharingMode::Shared, oboe::InputPreset::VoiceRecognition);
+    }
+    if (result != oboe::Result::OK) {
+        LOGE("Input shared/voice-recognition failed: %s", oboe::convertToText(result));
+        result = openInput(oboe::SharingMode::Shared, oboe::InputPreset::VoiceCommunication);
+    }
     if (result != oboe::Result::OK && preferredInputId != oboe::kUnspecified) {
         // The chosen device may have been unplugged/unavailable — fall back to the
         // system default rather than leaving the engine unable to start at all.
         LOGE("Failed to open input stream on device %d: %s — retrying with default device",
              preferredInputId, oboe::convertToText(result));
-        builder.setDeviceId(oboe::kUnspecified);
-        result = builder.openStream(inputStream_);
+        preferredInputId = oboe::kUnspecified;
+        result = openInput(oboe::SharingMode::Shared, oboe::InputPreset::VoiceRecognition);
+        if (result != oboe::Result::OK) {
+            result = openInput(oboe::SharingMode::Shared, oboe::InputPreset::VoiceCommunication);
+        }
     }
-
     if (result != oboe::Result::OK) {
         LOGE("Failed to open input stream: %s", oboe::convertToText(result));
         return false;
     }
 
-    sampleRate_    = inputStream_->getSampleRate();
+    sampleRate_ = inputStream_->getSampleRate();
     framesPerBurst_ = inputStream_->getFramesPerBurst();
+    if (framesPerBurst_ <= 0) framesPerBurst_ = 128;
     LOGI("Input stream opened: %dHz, %d frames/burst", sampleRate_, framesPerBurst_);
 
-    // ─ Output stream (playback → VOICE_COMMUNICATION) ────────────────────────
-    builder.setDirection(oboe::Direction::Output)
-           ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-           ->setSharingMode(oboe::SharingMode::Exclusive)
-           ->setFormat(oboe::AudioFormat::Float)
-           ->setChannelCount(1)
-           ->setSampleRate(sampleRate_)
-           ->setFramesPerDataCallback(framesPerBurst_)
-           ->setDataCallback(this)
-           ->setErrorCallback(this)
-           ->setUsage(oboe::Usage::VoiceCommunication)
-           ->setContentType(oboe::ContentType::Speech);
+    // ─ Output stream (playback clock; kept silent by the callback) ───────────
+    // A fresh builder is important: reusing the input builder carried its device
+    // id/input preset into the output stream. Usage::Media (not VoiceCommunication)
+    // avoids putting the device into "in call" mode — that is what made other apps
+    // report "unable to record while in a call" while MicUp was running.
+    auto openOutput = [&](oboe::SharingMode sharing) -> oboe::Result {
+        oboe::AudioStreamBuilder b;
+        b.setDirection(oboe::Direction::Output)
+            ->setDeviceId(oboe::kUnspecified)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setSharingMode(sharing)
+            ->setFormat(oboe::AudioFormat::Float)
+            ->setChannelCount(1)
+            ->setSampleRate(sampleRate_)
+            ->setFramesPerDataCallback(framesPerBurst_)
+            ->setDataCallback(this)
+            ->setErrorCallback(this)
+            ->setUsage(oboe::Usage::Media)
+            ->setContentType(oboe::ContentType::Speech);
+        return b.openStream(outputStream_);
+    };
 
-    result = builder.openStream(outputStream_);
+    result = openOutput(oboe::SharingMode::Exclusive);
+    if (result != oboe::Result::OK) {
+        LOGE("Output exclusive failed: %s — retrying shared", oboe::convertToText(result));
+        result = openOutput(oboe::SharingMode::Shared);
+    }
     if (result != oboe::Result::OK) {
         LOGE("Failed to open output stream: %s", oboe::convertToText(result));
         inputStream_->close();
+        inputStream_.reset();
         return false;
     }
 
-    // Boost audio thread priority (SCHED_FIFO P96 via Oboe)
     outputStream_->setBufferSizeInFrames(framesPerBurst_ * 2);
 
     // Start both streams
@@ -191,6 +213,7 @@ bool AudioEngine::openStreams() {
 
     eqDirty_ = true;
     rebuildEQ();
+    resetPitchState();
     return true;
 }
 
@@ -238,14 +261,18 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     // Measure input level (no log, no alloc — safe for RT)
     measureLevel(out, numFrames, params_.inputLevelDb);
 
-    // Process effects chain
+    // Process effects chain + external plugins. Master bypass must skip both:
+    // previously plugins kept running even when the user hit MASTER BYPASS.
     if (!params_.masterBypass.load(std::memory_order_relaxed)) {
         processEffectsChain(out, numFrames);
-    }
 
-    // Process external plugins
-    if (pluginHost_) {
-        pluginHost_->process(out, numFrames, sampleRate_);
+        if (pluginHost_) {
+            pluginHost_->process(out, numFrames, sampleRate_);
+        }
+    } else if (params_.pitchEnabled.load(std::memory_order_relaxed)) {
+        // Re-prime the pitch ring when bypass comes off; otherwise the first
+        // block after bypass would replay stale samples.
+        pitchPrimed_ = false;
     }
 
     // Measure output level
@@ -330,7 +357,12 @@ void AudioEngine::processEffectsChain(float* buf, int32_t frames) {
     if (params_.reverbEnabled.load(std::memory_order_relaxed))
         dsp_reverb(buf, frames);
 
-    if (params_.pitchEnabled.load(std::memory_order_relaxed))
+    const bool pitchOn = params_.pitchEnabled.load(std::memory_order_relaxed);
+    if (pitchOn != pitchWasEnabled_ || (pitchOn && !pitchPrimed_)) {
+        resetPitchState();
+        pitchWasEnabled_ = pitchOn;
+    }
+    if (pitchOn)
         dsp_pitchShift(buf, frames);
 }
 
@@ -423,28 +455,67 @@ void AudioEngine::dsp_reverb(float* buf, int32_t frames) {
     }
 }
 
-// ─── Granular Pitch Shifter (OLA / time-stretch) ─────────────────────────────
+// ─── Granular Pitch Shifter (two-tap Hann crossfade) ─────────────────────────
+void AudioEngine::resetPitchState() {
+    std::fill(pitchRing_, pitchRing_ + kPitchRingSize, 0.0f);
+    pitchWrite_ = 0;
+    pitchLagA_  = kPitchGrain * 0.25f;
+    pitchLagB_  = kPitchGrain * 0.75f;
+    pitchRate_  = 1.0f;
+    pitchPrimed_ = true;
+}
+
+float AudioEngine::readPitchTap(float lag) const {
+    // Read position trails the write cursor by `lag` samples. The ring is a
+    // power of two, so masking also handles negative positions wrapped once.
+    float pos = (float)pitchWrite_ - lag;
+    if (pos < 0.0f) pos += (float)kPitchRingSize;
+    int i0 = (int)pos;
+    float frac = pos - (float)i0;
+    int a = i0 & kPitchMask;
+    int b = (i0 + 1) & kPitchMask;
+    return pitchRing_[a] * (1.0f - frac) + pitchRing_[b] * frac;
+}
+
 void AudioEngine::dsp_pitchShift(float* buf, int32_t frames) {
     float semitones = params_.pitchSemitones.load(std::memory_order_relaxed);
-    float rate      = std::pow(2.0f, semitones / 12.0f); // playback rate
+    semitones = std::clamp(semitones, -24.0f, 24.0f);
+
+    // Unity is a true bypass: the two-tap blend is a comb filter at rate 1,
+    // so do not colour the signal when the user has not actually shifted it.
+    if (std::fabs(semitones) < 0.01f) {
+        for (int i = 0; i < frames; i++) {
+            pitchRing_[pitchWrite_] = buf[i];
+            pitchWrite_ = (pitchWrite_ + 1) & kPitchMask;
+        }
+        return;
+    }
+
+    const float targetRate = std::pow(2.0f, semitones / 12.0f);
 
     for (int i = 0; i < frames; i++) {
-        // Write input
-        pitchIn_[pitchWritePos_ % (kGrainSize*2)] = buf[i];
-        pitchWritePos_++;
+        // Write the new sample first, then read the two taps behind it.
+        pitchRing_[pitchWrite_] = buf[i];
 
-        // Read at variable rate (linear interpolation)
-        int   ri   = (int)pitchReadFrac_;
-        float frac = pitchReadFrac_ - ri;
-        int   i0   = ri % (kGrainSize*2);
-        int   i1   = (ri+1) % (kGrainSize*2);
-        buf[i]      = pitchIn_[i0] * (1.0f - frac) + pitchIn_[i1] * frac;
+        // One-pole glide on the rate kills zipper noise when the slider moves.
+        pitchRate_ += 0.0008f * (targetRate - pitchRate_);
 
-        pitchReadFrac_ += rate;
-        // Keep read pointer within 1 grain of write (latency = 1 grain)
-        float lag = pitchWritePos_ - pitchReadFrac_;
-        if (lag > kGrainSize*2 - 1) pitchReadFrac_ = pitchWritePos_ - kGrainSize;
-        if (lag < 1)               pitchReadFrac_ = pitchWritePos_ - kGrainSize;
+        pitchLagA_ += 1.0f - pitchRate_;
+        if (pitchLagA_ < 0.0f)             pitchLagA_ += kPitchGrain;
+        else if (pitchLagA_ >= kPitchGrain) pitchLagA_ -= kPitchGrain;
+
+        pitchLagB_ = pitchLagA_ + kPitchGrain * 0.5f;
+        if (pitchLagB_ >= kPitchGrain) pitchLagB_ -= kPitchGrain;
+
+        // Hann window is 0 at lag 0 and lag G, 1 at G/2. The second tap is
+        // offset by G/2, so the two weights sum to exactly 1 and each tap
+        // wraps only while its own weight is zero.
+        const float wA = 0.5f - 0.5f * std::cos(2.0f * (float)M_PI * pitchLagA_ / kPitchGrain);
+        const float wB = 1.0f - wA;
+
+        buf[i] = readPitchTap(pitchLagA_) * wA + readPitchTap(pitchLagB_) * wB;
+
+        pitchWrite_ = (pitchWrite_ + 1) & kPitchMask;
     }
 }
 
@@ -567,6 +638,12 @@ JNIEXPORT void JNICALL
 Java_com_micplugin_audio_OboeEngine_nativeSetPluginParam(
     JNIEnv*, jobject, jlong handle, jlong pluginHandle, jint paramId, jfloat value) {
     if (gPluginHost) gPluginHost->setPluginParam(pluginHandle, paramId, value);
+}
+
+JNIEXPORT void JNICALL
+Java_com_micplugin_audio_OboeEngine_nativeSetPluginEnabled(
+    JNIEnv*, jobject, jlong /*handle*/, jlong pluginHandle, jboolean enabled) {
+    if (gPluginHost) gPluginHost->setPluginEnabled(pluginHandle, enabled == JNI_TRUE);
 }
 
 JNIEXPORT jint JNICALL

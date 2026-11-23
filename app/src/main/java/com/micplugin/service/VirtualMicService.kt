@@ -25,10 +25,10 @@ enum class VirtualMicTier {
         ROOT_MAGISK      -> "Root Mode — System-Wide"
     }
     val description: String get() = when (this) {
-        VOIP_STREAM      -> "Processed audio routes through VoIP stream. Works with Meet, Teams, Discord, Zoom."
-        MEDIA_PROJECTION -> "Uses system-wide VOICE_COMMUNICATION injection. Works on Android 14+ to override default mic in most apps."
-        SHIZUKU_ADB      -> "Uses Shizuku (ADB-level) to load ALSA loopback and route processed audio. Apps see 'MicPlugin Virtual Mic' without full root."
-        ROOT_MAGISK      -> "Magisk module creates /dev/snd/virtual_mic via ALSA loopback. All apps see MicPlugin as a separate hardware device."
+        VOIP_STREAM      -> "DSP and monitor output only. Android gives no way to inject this stream into other apps' microphones without a virtual-mic device."
+        MEDIA_PROJECTION -> "Software loopback monitor on Android 10+. Good for recording and self-monitoring; other apps still use the hardware mic."
+        SHIZUKU_ADB      -> "Shizuku command access. Virtual-mic routing needs a kernel with snd-aloop; MicUp++ verifies /proc/asound/cards and falls back if it is missing."
+        ROOT_MAGISK      -> "Root mode. Requires a kernel with snd-aloop; MicUp++ verifies the loopback card before claiming the tier is active."
     }
     val badgeColorHex: Long get() = when (this) {
         VOIP_STREAM      -> 0xFF3DFCACL
@@ -252,8 +252,12 @@ class VirtualMicService @Inject constructor(
             }
             VirtualMicTier.SHIZUKU_ADB -> {
                 if (isRooted()) {
-                    installMagiskModule(activity)
-                    _activeTier.value = VirtualMicTier.ROOT_MAGISK
+                    val reason = checkTierAvailability(VirtualMicTier.ROOT_MAGISK)
+                    if (reason == null) {
+                        _activeTier.value = VirtualMicTier.ROOT_MAGISK
+                    } else {
+                        Log.w(TAG, "Root tier unavailable: $reason")
+                    }
                 }
             }
             VirtualMicTier.ROOT_MAGISK -> {}
@@ -261,13 +265,9 @@ class VirtualMicService @Inject constructor(
     }
 
     private fun installMagiskModule(context: Context) {
-        try {
-            val outFile = File(context.cacheDir, MAGISK_MODULE_ASSET)
-            context.assets.open(MAGISK_MODULE_ASSET).use { i -> outFile.outputStream().use { o -> i.copyTo(o) } }
-            execRoot("magisk --install-module ${outFile.absolutePath}") ?: execRoot("/data/adb/magisk/magisk --install-module ${outFile.absolutePath}")
-            Log.i(TAG, "Magisk module extraction triggered")
-        } catch (e: Exception) {
-            Log.e(TAG, "Magisk module install failed: $e")
-        }
+        // Retained for callers that want to ship a module later. The old code
+        // opened an asset that does not exist, so it always failed silently.
+        // Root tier now verifies snd-aloop instead of pretending to install.
+        Log.i(TAG, "Magisk auto-install is not shipped; verify snd-aloop manually")
     }
 }

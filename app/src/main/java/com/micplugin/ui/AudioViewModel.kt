@@ -17,6 +17,7 @@ import com.micplugin.service.VirtualMicTier
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 
@@ -77,6 +78,7 @@ class AudioViewModel @Inject constructor(
     private val _reverbState = MutableStateFlow(ReverbState())
     private val _pitchState  = MutableStateFlow(PitchState())
     private val _masterBypass = MutableStateFlow(false)
+    private val _pluginLoadError = MutableStateFlow<String?>(null)
 
     val gateState:    StateFlow<GateState>    = _gateState
     val eqState:      StateFlow<EqState>      = _eqState
@@ -84,6 +86,7 @@ class AudioViewModel @Inject constructor(
     val reverbState:  StateFlow<ReverbState>  = _reverbState
     val pitchState:   StateFlow<PitchState>   = _pitchState
     val masterBypass: StateFlow<Boolean>      = _masterBypass
+    val pluginLoadError: StateFlow<String?>   = _pluginLoadError
 
     private val _selectedPreset = MutableStateFlow<Preset?>(null)
     val selectedPreset: StateFlow<Preset?> = _selectedPreset
@@ -201,10 +204,27 @@ class AudioViewModel @Inject constructor(
     // ── Plugin chain ──────────────────────────────────────────────────────────
     fun addPlugin(descriptor: PluginDescriptor) {
         viewModelScope.launch {
-            val handle = if (descriptor.format != PluginFormat.APK)
-                audioEngine.loadNativePlugin(descriptor.path, descriptor.format) else 0L
-            val slot = PluginSlot(descriptor = descriptor, nativeHandle = handle)
+            if (descriptor.format == PluginFormat.APK) {
+                _pluginLoadError.value =
+                    "APK plugin hosting is not available in this build. Use CLAP, LV2, or VST3."
+                return@launch
+            }
+            val handle = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                audioEngine.loadNativePlugin(descriptor.path, descriptor.format)
+            }
+            if (handle == 0L) {
+                _pluginLoadError.value =
+                    "Could not load ${descriptor.name}. The plugin must be built for Android ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64"}."
+                return@launch
+            }
+            val defaults = descriptor.params.associate { it.id to it.default }
+            val slot = PluginSlot(
+                descriptor = descriptor,
+                nativeHandle = handle,
+                paramValues = defaults,
+            )
             audioEngine.pluginChain.addPlugin(slot)
+            _pluginLoadError.value = null
         }
     }
 
@@ -214,7 +234,14 @@ class AudioViewModel @Inject constructor(
         audioEngine.pluginChain.removePlugin(id)
     }
 
-    fun togglePlugin(id: UUID) = audioEngine.pluginChain.toggleEnabled(id)
+    fun togglePlugin(id: UUID) {
+        val slot = audioEngine.pluginChain.getSlot(id) ?: return
+        val enabled = !slot.enabled
+        if (slot.nativeHandle != 0L) audioEngine.setNativePluginEnabled(slot.nativeHandle, enabled)
+        audioEngine.pluginChain.setEnabled(id, enabled)
+    }
+
+    fun clearPluginLoadError() { _pluginLoadError.value = null }
 
     fun reorderPlugin(from: Int, to: Int) = audioEngine.pluginChain.reorder(from, to)
 

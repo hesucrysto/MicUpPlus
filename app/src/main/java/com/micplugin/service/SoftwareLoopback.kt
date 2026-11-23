@@ -37,9 +37,10 @@ object SoftwareLoopback {
         if (running) return
         audioManager = context.getSystemService(AudioManager::class.java)
 
-        // Respect the persisted monitor on/off choice on (re)start, even before the UI loads.
-        monitorEnabled = context.getSharedPreferences("micup_prefs", Context.MODE_PRIVATE)
-            .getBoolean("monitor_enabled", true)
+        // Respect persisted choices on (re)start, even before the UI loads.
+        val prefs = context.getSharedPreferences("micup_prefs", Context.MODE_PRIVATE)
+        monitorEnabled = prefs.getBoolean("monitor_enabled", true)
+        selectedDeviceId = prefs.getInt("output_device_id", -1)
 
         val minBuf = AudioTrack.getMinBufferSize(SAMPLE_RATE,
             AudioFormat.CHANNEL_OUT_MONO, FORMAT).coerceAtLeast(4096)
@@ -51,16 +52,11 @@ object SoftwareLoopback {
         monitorTrack!!.setVolume(if (monitorEnabled) 1f else 0f)
         if (android.os.Build.VERSION.SDK_INT >= 23) monitorTrack!!.preferredDevice = null
 
-        // Suppress physical mic playback path — processed path is the only output
-        try {
-            @Suppress("DEPRECATION")
-            audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
-            @Suppress("DEPRECATION")
-            audioManager?.isSpeakerphoneOn = false
-            // Mute mic playback (not recording) — stops raw voice leaking to output
-            audioManager?.isMicrophoneMute = false  // keep recording alive
-        } catch (_: Exception) {}
-
+        // Do NOT switch the device into MODE_IN_COMMUNICATION here. That made the
+        // whole phone behave as if a call was active, so other recorders failed
+        // with "unable to record while in a call" even when MicUp was only
+        // monitoring. The monitor is ordinary media playback; leave audio mode
+        // alone and let the user's call app own call routing.
         running = true
         queue.clear()
 
@@ -99,10 +95,6 @@ object SoftwareLoopback {
         try { monitorTrack?.stop(); monitorTrack?.release() } catch (_: Exception) {}
         monitorTrack = null
         abandonAudioFocus()
-        try {
-            @Suppress("DEPRECATION") audioManager?.mode = AudioManager.MODE_NORMAL
-            @Suppress("DEPRECATION") audioManager?.isSpeakerphoneOn = false
-        } catch (_: Exception) {}
         Log.i(TAG, "SoftwareLoopback stopped")
     }
 
@@ -224,7 +216,7 @@ object SoftwareLoopback {
         if (Build.VERSION.SDK_INT >= 26) {
             focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                 .setOnAudioFocusChangeListener(listener)
                 .setWillPauseWhenDucked(false).build()
@@ -248,7 +240,7 @@ object SoftwareLoopback {
         if (Build.VERSION.SDK_INT >= 26) {
             AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                 .setAudioFormat(AudioFormat.Builder()
                     .setSampleRate(SAMPLE_RATE)
@@ -258,7 +250,7 @@ object SoftwareLoopback {
                 .setTransferMode(AudioTrack.MODE_STREAM).build()
         } else {
             @Suppress("DEPRECATION")
-            AudioTrack(AudioManager.STREAM_VOICE_CALL, SAMPLE_RATE,
+            AudioTrack(AudioManager.STREAM_MUSIC, SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,   // pre-API26 fallback
                 bufSize * 2, AudioTrack.MODE_STREAM)
