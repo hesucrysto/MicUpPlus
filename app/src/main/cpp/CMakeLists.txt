@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(micplugin_native VERSION 1.0.0 LANGUAGES CXX)
+project(micplugin_native VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,4 +65,25 @@ target_link_libraries(micplugin_native
     android
     dl        # dlopen for plugin loading
     OpenSLES  # OpenSL ES fallback
+)
+
+# ─── System capture effect (root engine) ─────────────────────────────────────
+# Built as a standalone .so and loaded by audioserver through audio_effects.xml.
+# Pure C on purpose: no libc++ dependency inside a system process.
+add_library(micup_effect SHARED effect/micup_effect.c)
+
+target_compile_options(micup_effect PRIVATE
+    -O2
+    -fvisibility=hidden
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+)
+
+target_link_libraries(micup_effect log m)
+
+set_target_properties(micup_effect PROPERTIES
+    PREFIX "lib"
+    OUTPUT_NAME "micup_effect"
+    POSITION_INDEPENDENT_CODE ON
 )

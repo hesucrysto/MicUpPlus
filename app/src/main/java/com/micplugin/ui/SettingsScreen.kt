@@ -210,6 +210,18 @@ fun SettingsScreen(navController: NavController, vm: AudioViewModel = hiltViewMo
                 SettingsActionRow("Rescan Plugin Directories", Icons.Default.Refresh) { vm.rescan() }
             }
 
+            // ── System voice engine ───────────────────────────────────────────
+            SettingsSection("System Voice Engine (root)") {
+                SettingsActionRow("Voice changer for all apps", Icons.Default.Build) {
+                    navController.navigate("voice_changer")
+                }
+                Text(
+                    "Installs a Magisk module that loads MicUp++ as a capture-path preprocess " +
+                        "effect, so Discord, WhatsApp and recorders record the processed voice.",
+                    fontSize = 9.sp, color = StudioColors.TextMuted, lineHeight = 13.sp,
+                )
+            }
+
             // ── About ─────────────────────────────────────────────────────────
             SettingsSection("About") {
                 SettingsInfoRow("Version", com.micplugin.BuildConfig.VERSION_NAME)

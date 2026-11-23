@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
                             }
                             composable("settings") { SettingsScreen(navController) }
                             composable("plugin_paths") { PluginPathsScreen(navController) }
+                            composable("voice_changer") { VoiceChangerScreen(navController) }
                         }
                     }
                 }
