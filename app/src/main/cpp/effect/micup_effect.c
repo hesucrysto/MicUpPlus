@@ -92,6 +92,9 @@ typedef struct {
     int          channels;
     int          format;
     uint32_t     blockCounter;
+    int          logFirstBlock;
+    int          logOpenFail;
+    float        logPitch;
 
     float    dcX[FX_MAX_CH];
     float    dcY[FX_MAX_CH];
@@ -441,12 +444,29 @@ static int32_t fx_process(effect_handle_t self, audio_buffer_t* in, audio_buffer
         if (fx_load_params(&np) == 0) {
             float oldBody = fx->p.body;
             float oldLow = fx->p.lowDb, oldMid = fx->p.midDb, oldHigh = fx->p.highDb;
+            if (np.preset != fx->p.preset || np.pitch != fx->logPitch) {
+                LOGI("params: preset=%u pitch=%.1f body=%.1f mix=%.2f",
+                     np.preset, np.pitch, np.body, np.mix);
+                fx->logPitch = np.pitch;
+            }
             fx->p = np;
+            fx->logOpenFail = 0;
             if (np.body != oldBody || np.lowDb != oldLow || np.midDb != oldMid ||
                 np.highDb != oldHigh) {
                 fx_apply_coeffs(fx);
             }
+        } else if (!fx->logOpenFail) {
+            /* Logged once per transition so a missing file is visible in logcat
+             * without flooding the audio thread. */
+            LOGI("params file unreadable errno=%d - running on defaults", errno);
+            fx->logOpenFail = 1;
         }
+    }
+
+    if (!fx->logFirstBlock) {
+        fx->logFirstBlock = 1;
+        LOGI("first block: fmt=0x%x ch=%d sr=%d frames=%zu",
+             fx->format, fx->channels, fx->sr, in->frameCount);
     }
 
     if (fx->format != AUDIO_FORMAT_PCM_16_BIT && fx->format != AUDIO_FORMAT_PCM_FLOAT) {
@@ -652,12 +672,15 @@ static int32_t fx_create(const effect_uuid_t* uuid, int32_t sessionId, int32_t i
     fx->p.compRatio = 4.f;
 
     fx_params_t disk;
-    if (fx_load_params(&disk) == 0) fx->p = disk;
+    int haveDisk = (fx_load_params(&disk) == 0);
+    if (haveDisk) fx->p = disk;
+    fx->logPitch = fx->p.pitch;
 
     fx_apply_coeffs(fx);
     fx_reset_state(fx);
     *pHandle = (effect_handle_t)fx;
-    LOGI("instance created");
+    LOGI("instance created (params %s, pitch %.1f)",
+         haveDisk ? "from disk" : "defaults", fx->p.pitch);
     return 0;
 }
 

@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +61,10 @@ class VoiceChangerViewModel @Inject constructor(
         private set
     var message by mutableStateOf("")
         private set
+    var report by mutableStateOf("")
+        private set
+    var diagnosing by mutableStateOf(false)
+        private set
 
     init { refresh() }
 
@@ -66,6 +72,24 @@ class VoiceChangerViewModel @Inject constructor(
         viewModelScope.launch {
             status = rootEngine.status()
         }
+    }
+
+    fun diagnose() {
+        if (diagnosing) return
+        diagnosing = true
+        viewModelScope.launch {
+            report = try {
+                rootEngine.diagnose()
+            } catch (t: Throwable) {
+                t.message ?: "diagnosis failed"
+            }
+            diagnosing = false
+            status = rootEngine.status()
+        }
+    }
+
+    fun clearReport() {
+        report = ""
     }
 
     fun update(block: (RootEngine.VoiceParams) -> RootEngine.VoiceParams) {
@@ -153,6 +177,7 @@ fun VoiceChangerScreen(navController: NavController, vm: VoiceChangerViewModel =
                     StatusLine("Module", status.moduleInstalled)
                     StatusLine("Config patched", status.patched)
                     StatusLine("Effect loaded", status.effectLoaded)
+                    StatusLine("Params flowing", status.paramsFlowing)
                     if (status.configPath.isNotEmpty()) {
                         Text(
                             status.configPath,
@@ -179,6 +204,20 @@ fun VoiceChangerScreen(navController: NavController, vm: VoiceChangerViewModel =
                     modifier = Modifier.weight(1f),
                 ) { Text("Reboot", fontSize = 11.sp) }
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { vm.diagnose() },
+                    enabled = !vm.diagnosing && status.rootAvailable,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(if (vm.diagnosing) "Reading…" else "Run diagnosis", fontSize = 11.sp)
+                }
+                if (vm.report.isNotEmpty()) {
+                    TextButton(onClick = { vm.clearReport() }) {
+                        Text("Clear", fontSize = 11.sp, color = StudioColors.TextMuted)
+                    }
+                }
+            }
             if (status.moduleInstalled) {
                 TextButton(onClick = { vm.uninstall() }, enabled = !vm.busy) {
                     Text("Uninstall engine", color = StudioColors.MeterRed, fontSize = 11.sp)
@@ -186,6 +225,35 @@ fun VoiceChangerScreen(navController: NavController, vm: VoiceChangerViewModel =
             }
             if (vm.message.isNotEmpty()) {
                 Text(vm.message, fontSize = 10.sp, color = StudioColors.MeterAmber, lineHeight = 14.sp)
+            }
+
+            if (vm.report.isNotEmpty()) {
+                val clipboard = LocalClipboardManager.current
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = StudioColors.Background,
+                    border = BorderStroke(0.5.dp, StudioColors.Border),
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("DIAGNOSIS", fontSize = 9.sp, color = StudioColors.TextMuted, letterSpacing = 1.sp)
+                            TextButton(onClick = {
+                                clipboard.setText(AnnotatedString(vm.report))
+                            }) { Text("Copy", fontSize = 10.sp, color = StudioColors.Accent) }
+                        }
+                        Text(
+                            vm.report,
+                            fontSize = 9.sp,
+                            color = StudioColors.TextPrimary,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 12.sp,
+                        )
+                    }
+                }
             }
 
             Text("PRESETS", fontSize = 9.sp, color = StudioColors.TextMuted, letterSpacing = 1.sp)
