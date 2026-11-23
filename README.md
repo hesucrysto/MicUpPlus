@@ -75,6 +75,8 @@ Default scan root: `filesDir/plugins/{clap,lv2,vst3}`.
 
 ## Virtual microphone — what Android can and cannot do
 
+The tiers below are the no-root path. For a real system-wide voice changer see **System-wide voice changer (root)** above — that is the only route that makes other apps capture processed audio.
+
 Android does not expose a system-wide virtual input device to third-party apps. There is no public API that makes Discord hear MicUp++. The tiers in Settings mean:
 
 - **VoIP Compatible** — DSP + monitor output. You hear the processed voice; other apps use the raw mic.
@@ -83,6 +85,52 @@ Android does not expose a system-wide virtual input device to third-party apps. 
 - **Root (Magisk)** — `modprobe snd-aloop`, /proc probe, and appops routing where the kernel supports it.
 
 If the probe fails, the tier is shown as unavailable with the reason. Nothing claims a route it does not have.
+
+---
+
+## System-wide voice changer (root)
+
+Android has no public API that lets an app become another app's microphone. The only real route is a capture-path effect installed into the audio framework — the same mechanism Equalizer APO uses on Windows, translated to Android's effect HAL.
+
+**Settings → System Voice Engine (root) → Install engine.** The app writes a Magisk module and patches the device's own `audio_effects.xml`; reboot once.
+
+What gets installed:
+
+```
+/data/adb/modules/micup_plus/
+  module.prop
+  sepolicy.rule                    # audioserver may read the params file
+  post-fs-data.sh                  # creates /data/local/tmp/micup_params.bin
+  system/lib64/soundfx/libmicup_effect.so
+  system/lib/soundfx/libmicup_effect.so
+  system/vendor/etc/audio_effects.xml   # patched copy of the live config
+```
+
+Patched config, additive only — existing AEC/NS/AGC entries are untouched:
+
+```xml
+<library name="micup" path="libmicup_effect.so"/>
+<effect name="micup" library="micup" uuid="6d696375-7000-4d69-6355-700000000001"/>
+<preprocess>
+  <stream type="voice_communication"><apply effect="micup"/></stream>
+  <stream type="mic"><apply effect="micup"/></stream>
+</preprocess>
+```
+
+Why this works where an app cannot: `audio_effects.xml` is read by `audioserver`, and a `<preprocess>` entry binds the effect to the capture path *below* every app. Discord opens `AUDIO_SOURCE_VOICE_COMMUNICATION`, the framework inserts the effect, and the recorded stream is already transformed.
+
+### Controls
+
+The effect reads `/data/local/tmp/micup_params.bin` — 64 bytes, little-endian, format in `RootEngine.VoiceParams`. The engine polls it ~6 times a second inside `process()`, so the UI can change pitch, body, EQ, drive, reverb, gate and mix live without restarting capture.
+
+Presets: Natural, Deep, Monster, Chipmunk, Radio, Ghost, Robot. Every slider is live; pull the mix down to A/B against the dry mic.
+
+### Limits, stated
+
+- The effect runs on the capture path, so it applies to recordings too, not only calls. That is the point of a system processor; uninstall the module when you do not want it.
+- `voice_recognition` is deliberately not patched — Android's compatibility rules forbid preprocessing there.
+- Devices whose audio stack ignores `<preprocess>` (some OEM voice paths) will load the library but not insert it. The status panel reports "Config patched" vs "Effect loaded" separately so the difference is visible.
+- Uninstall from the same screen and reboot to return to the stock capture path.
 
 ---
 

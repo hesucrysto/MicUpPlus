@@ -164,6 +164,10 @@ typedef struct audio_effect_library_s {
                              int32_t ioId, effect_handle_t* pHandle);
     int32_t (*release_effect)(effect_handle_t handle);
     int32_t (*get_descriptor)(const effect_uuid_t* uuid, effect_descriptor_t* pDescriptor);
+    /* API 3.1: same as create_effect with a device id. Present so Android 14+
+     * hosts that check the minor version have something to call. */
+    int32_t (*create_effect_3_1)(const effect_uuid_t* uuid, int32_t sessionId,
+                                 int32_t ioId, int32_t deviceId, effect_handle_t* pHandle);
 } audio_effect_library_t;
 
 #ifdef __cplusplus

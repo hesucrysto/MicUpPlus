@@ -174,7 +174,7 @@ class RootEngine @Inject constructor(
             if (patched == null) error("audio_effects.xml has no <libraries> or <effects> section")
 
             val nativeDir = context.applicationInfo.nativeLibraryDir
-            val lib64 = File(nativeDir, "libmicup_effect.so")
+            val lib64 = stageEffectLib()
             if (!lib64.exists()) error("libmicup_effect.so missing from the APK")
 
             // stage everything in app cache, then let root copy it into place
@@ -258,6 +258,36 @@ class RootEngine @Inject constructor(
     }
 
     // ─── Config patch ─────────────────────────────────────────────────────────
+
+    /**
+     * Returns a filesystem copy of libmicup_effect.so. With extractNativeLibs=false
+     * the APK keeps the library compressed inside the archive and nativeLibraryDir
+     * has no readable file, so fall back to pulling the entry out of the APK.
+     */
+    private fun stageEffectLib(): File {
+        val dir = File(context.cacheDir, "engine")
+        if (!dir.exists()) dir.mkdirs()
+        val out = File(dir, "libmicup_effect.so")
+        if (out.exists() && out.length() > 0) return out
+
+        val direct = File(context.applicationInfo.nativeLibraryDir, "libmicup_effect.so")
+        if (direct.exists() && direct.length() > 0) {
+            direct.copyTo(out, overwrite = true)
+            return out
+        }
+
+        val abi = context.applicationInfo.primaryCpuAbi
+            ?: android.os.Build.SUPPORTED_ABIS.firstOrNull()
+            ?: "arm64-v8a"
+        val entryName = "lib/$abi/libmicup_effect.so"
+        java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
+            val entry = zip.getEntry(entryName) ?: error("$entryName not in APK")
+            zip.getInputStream(entry).use { input ->
+                out.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        return out
+    }
 
     /**
      * Adds the library, the effect and the preprocess entries without touching

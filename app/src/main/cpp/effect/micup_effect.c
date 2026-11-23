@@ -303,7 +303,14 @@ static inline float read_ring(const float* ring, float pos) {
 
 static float fx_pitch(fx_t* fx, int c, float in) {
     float semis = clampf(fx->p.pitch, -24.f, 24.f);
-    if (fabsf(semis) < 0.02f) return in;
+    if (fabsf(semis) < 0.02f) {
+        /* keep the delay line warm so engaging pitch does not start from silence */
+        fx->ring[c][fx->ringW[c]] = in;
+        fx->ringW[c] = (fx->ringW[c] + 1) & (uint32_t)(FX_RING - 1);
+        fx->tapA[c].elapsed = -1;
+        fx->tapB[c].elapsed = -1;
+        return in;
+    }
 
     float rate = powf(2.f, semis / 12.f);
     uint32_t w = fx->ringW[c];
@@ -667,12 +674,19 @@ static int32_t fx_get_descriptor_lib(const effect_uuid_t* uuid, effect_descripto
     return 0;
 }
 
+static int32_t fx_create_3_1(const effect_uuid_t* uuid, int32_t sessionId, int32_t ioId,
+                             int32_t deviceId, effect_handle_t* pHandle) {
+    (void)deviceId;
+    return fx_create(uuid, sessionId, ioId, pHandle);
+}
+
 __attribute__((visibility("default"))) audio_effect_library_t AUDIO_EFFECT_LIBRARY_INFO_SYM = {
     .tag = AUDIO_EFFECT_LIBRARY_TAG,
-    .version = EFFECT_LIBRARY_API_VERSION,
+    .version = EFFECT_MAKE_API_VERSION(3, 1),
     .name = "MicUp++ Voice Engine",
     .implementor = "MicUp++",
     .create_effect = fx_create,
     .release_effect = fx_release,
     .get_descriptor = fx_get_descriptor_lib,
+    .create_effect_3_1 = fx_create_3_1,
 };
