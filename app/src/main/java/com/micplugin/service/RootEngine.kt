@@ -276,12 +276,11 @@ class RootEngine @Inject constructor(
             return out
         }
 
-        val abi = context.applicationInfo.primaryCpuAbi
-            ?: android.os.Build.SUPPORTED_ABIS.firstOrNull()
-            ?: "arm64-v8a"
-        val entryName = "lib/$abi/libmicup_effect.so"
+        val abis = android.os.Build.SUPPORTED_ABIS.toList() + listOf("arm64-v8a", "armeabi-v7a")
         java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
-            val entry = zip.getEntry(entryName) ?: error("$entryName not in APK")
+            val entry = abis.firstNotNullOfOrNull { abi ->
+                zip.getEntry("lib/$abi/libmicup_effect.so")
+            } ?: error("libmicup_effect.so not in APK for any supported ABI")
             zip.getInputStream(entry).use { input ->
                 out.outputStream().use { output -> input.copyTo(output) }
             }
