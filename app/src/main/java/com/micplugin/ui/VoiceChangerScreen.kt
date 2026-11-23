@@ -1,4 +1,4 @@
-package com.micplugin.ui
+﻿package com.micplugin.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -217,31 +217,31 @@ fun VoiceChangerScreen(navController: NavController, vm: VoiceChangerViewModel =
             }
 
             Text("SHAPE", fontSize = 9.sp, color = StudioColors.TextMuted, letterSpacing = 1.sp)
-            ParamSlider("Pitch", params.pitch, -24f, 24f, "%.1f st", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Pitch", params.pitch, -24f, 24f, "%.1f st", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(pitch = it) }
             }
-            ParamSlider("Body", params.body, -12f, 12f, "%.1f", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Body", params.body, -12f, 12f, "%.1f", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(body = it) }
             }
-            ParamSlider("Low", params.lowDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Low", params.lowDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(lowDb = it) }
             }
-            ParamSlider("Mid", params.midDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Mid", params.midDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(midDb = it) }
             }
-            ParamSlider("High", params.highDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
+            VoiceSlider("High", params.highDb, -18f, 18f, "%.1f dB", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(highDb = it) }
             }
-            ParamSlider("Drive", params.drive, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Drive", params.drive, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(drive = it) }
             }
-            ParamSlider("Reverb", params.reverb, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Reverb", params.reverb, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(reverb = it) }
             }
-            ParamSlider("Mix", params.mix, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Mix", params.mix, 0f, 1f, "%.2f", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(mix = it) }
             }
-            ParamSlider("Gate", params.gateDb, -80f, 0f, "%.0f dB", onFinished = { vm.pushParams() }) {
+            VoiceSlider("Gate", params.gateDb, -80f, 0f, "%.0f dB", onFinished = { vm.pushParams() }) {
                 vm.update { p -> p.copy(gateDb = it) }
             }
 
@@ -278,7 +278,7 @@ private fun StatusLine(label: String, on: Boolean) {
 }
 
 @Composable
-private fun ParamSlider(
+private fun VoiceSlider(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,

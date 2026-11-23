@@ -288,7 +288,10 @@ class RootEngine @Inject constructor(
 
         out = if (out.contains("<preprocess")) {
             val re = Regex("<preprocess[^>]*>")
-            re.replaceFirst(out) { m -> m.value + "\n" + streams }
+            val m = re.find(out)
+            if (m == null) out
+            else out.substring(0, m.range.first) + m.value + "\n" + streams +
+                out.substring(m.range.last + 1)
         } else {
             out.replaceFirst(
                 "</audio_effects_conf>",
