@@ -281,7 +281,8 @@ private fun StatusLine(label: String, on: Boolean) {
 private fun VoiceSlider(
     label: String,
     value: Float,
-    range: ClosedFloatingPointRange<Float>,
+    min: Float,
+    max: Float,
     format: String,
     onFinished: () -> Unit = {},
     onChange: (Float) -> Unit,
@@ -295,7 +296,7 @@ private fun VoiceSlider(
             value = value,
             onValueChange = onChange,
             onValueChangeFinished = onFinished,
-            valueRange = range,
+            valueRange = min..max,
             colors = SliderDefaults.colors(
                 thumbColor = StudioColors.Accent,
                 activeTrackColor = StudioColors.Accent,
