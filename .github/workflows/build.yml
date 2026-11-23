@@ -30,12 +30,19 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK, CMake and platform
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install \
+          set -euo pipefail
+          # The ubuntu-latest image already ships an Android SDK. Point Gradle at
+          # it and install the packages this project pins. setup-android v3 is not
+          # used: it tries to install the removed "tools" package and fails.
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          SDKM=$(command -v sdkmanager || echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager")
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" --install \
+            "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;26.3.11579264" \
